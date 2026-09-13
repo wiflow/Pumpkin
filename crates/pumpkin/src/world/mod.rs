@@ -4721,8 +4721,6 @@ impl World {
                         // stale data.
                         base_entity.velocity.store(Vector3::default());
 
-                        player.client.enqueue_spawn_packet(&entity);
-                        player.try_restore_vehicle(&entity);
                         entities_to_add.push(entity);
                     }
 
@@ -4732,15 +4730,25 @@ impl World {
                             new_entities.extend(entities_to_add.iter().cloned());
                             new_entities
                         });
+                        // The tracker pairs every player in range, which sends the
+                        // spawn packet together with metadata and equipment.
+                        for entity in &entities_to_add {
+                            world.entity_tracker.add_entity(entity, &world);
+                            player.try_restore_vehicle(entity);
+                        }
                     }
                 } else {
                     // The chunk's entities are already live (another watcher loaded
-                    // them). Just send this player the spawn packets for the live
-                    // entities currently in this chunk.
+                    // them). Let the tracker pair this player with them.
                     for entity in world.entities.load().iter() {
                         let base_entity = entity.get_entity();
                         if base_entity.chunk_pos.load() == position {
-                            player.client.enqueue_spawn_packet(entity);
+                            if let Some(tracked) = world
+                                .entity_tracker
+                                .get_tracked_entity(base_entity.entity_id)
+                            {
+                                tracked.update_player(&player, &world);
+                            }
                             player.try_restore_vehicle(entity);
                         }
                     }
