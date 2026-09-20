@@ -983,12 +983,23 @@ impl World {
                     continue;
                 }
                 Err(err) => {
-                    error!(
-                        "Failed to serialize packet {} for version {:?}: {}",
-                        std::any::type_name::<P>(),
-                        version,
-                        err
-                    );
+                    // A write for an older client fails on purpose when the packet
+                    // names something that version does not have.
+                    if version == pumpkin_data::packet::CURRENT_MC_VERSION {
+                        error!(
+                            "Failed to serialize packet {} for version {:?}: {}",
+                            std::any::type_name::<P>(),
+                            version,
+                            err
+                        );
+                    } else {
+                        tracing::debug!(
+                            "Left out packet {} for version {:?}: {}",
+                            std::any::type_name::<P>(),
+                            version,
+                            err
+                        );
+                    }
                     continue;
                 }
             };
