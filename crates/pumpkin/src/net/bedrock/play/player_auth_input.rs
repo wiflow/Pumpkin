@@ -222,7 +222,7 @@ impl BedrockClient {
 
         if let Some(block_actions) = packet.block_actions {
             for action in &block_actions {
-                self.handle_player_block_action(player, server, action);
+                self.handle_player_block_action(player, action);
             }
         }
     }

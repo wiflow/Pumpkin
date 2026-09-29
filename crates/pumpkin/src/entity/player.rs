@@ -2901,8 +2901,6 @@ impl Player {
         if self.mining.load(Ordering::Relaxed)
             && let Some(p) = self.world().get_player_by_uuid(self.gameprofile.id)
         {
-            let world_clone = p.world();
-            let server_clone = world_clone.server.upgrade();
             let pos = *p
                 .mining_pos
                 .lock()
@@ -2921,29 +2919,7 @@ impl Player {
                 );
                 if finished && matches!(p.client.as_ref(), ClientPlatform::Bedrock(_)) {
                     p.stop_mining();
-
-                    let block = Block::from_state_id(state.id);
-                    let can_harvest = p.can_harvest(state, block);
-                    let flags = if can_harvest {
-                        pumpkin_world::world::BlockFlags::NOTIFY_ALL
-                    } else {
-                        pumpkin_world::world::BlockFlags::SKIP_DROPS
-                            | pumpkin_world::world::BlockFlags::NOTIFY_ALL
-                    };
-                    if world.break_block(&pos, Some(&p), flags).is_some() {
-                        if let Some(server) = server_clone {
-                            server
-                                .block_registry
-                                .broken(&world, block, &p, &pos, &server, state);
-                        }
-                        p.apply_tool_damage_for_block_break(state);
-                        if can_harvest {
-                            p.add_exhaustion(MINE_BLOCK_EXHAUSTION);
-                        }
-                        let item_id = p.inventory().held_item().item.id;
-                        p.increment_stat(StatisticCategory::Used, item_id as i32, 1);
-                        p.increment_stat(StatisticCategory::Mined, state.id.as_u16() as i32, 1);
-                    }
+                    p.destroy_block(&pos);
                 }
             }
         }
@@ -3067,6 +3043,41 @@ impl Player {
                 BlockBreakingProgress::Stop,
             );
         }
+    }
+
+    /// Breaks the block at `pos` as this player with the held item, like vanilla's
+    /// `ServerPlayerGameMode#destroyBlock`: creative players get no drops, tool damage or
+    /// statistics. Returns false when nothing broke.
+    pub fn destroy_block(self: &Arc<Self>, pos: &BlockPos) -> bool {
+        let world = self.world();
+        let (block, state) = world.get_block_and_state(pos);
+        let creative = self.gamemode.load() == GameMode::Creative;
+        let can_harvest = !creative && self.can_harvest(state, block);
+        let flags = if can_harvest {
+            pumpkin_world::world::BlockFlags::NOTIFY_ALL
+        } else {
+            pumpkin_world::world::BlockFlags::SKIP_DROPS
+                | pumpkin_world::world::BlockFlags::NOTIFY_ALL
+        };
+        if world.break_block(pos, Some(self), flags).is_none() {
+            return false;
+        }
+        if let Some(server) = world.server.upgrade() {
+            server
+                .block_registry
+                .broken(&world, block, self, pos, &server, state);
+        }
+        if creative {
+            return true;
+        }
+        self.apply_tool_damage_for_block_break(state);
+        if can_harvest {
+            self.add_exhaustion(MINE_BLOCK_EXHAUSTION);
+        }
+        let item_id = self.inventory().held_item().item.id;
+        self.increment_stat(StatisticCategory::Used, item_id as i32, 1);
+        self.increment_stat(StatisticCategory::Mined, block.id.as_u16() as i32, 1);
+        true
     }
 
     pub fn jump(&self) {
